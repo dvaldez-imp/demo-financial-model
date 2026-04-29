@@ -1,0 +1,16 @@
+id,model_id,name,description,is_base
+scn_ventas_base,model_ventas,Base,Escenario base de demanda retail,true
+scn_ventas_upside,model_ventas,Upside comercial,Mayor traccion comercial y mejor ticket,false
+scn_combustible_base,model_combustible,Base,Escenario base de combustible,true
+scn_macro_base,model_macro,Base,Escenario base macro,true
+scn_macro_depreciacion,model_macro,Depreciacion GTQ,Depreciacion cambiaria y resina mas cara,false
+scn_arima_base,model_arima,Base,Escenario base ARIMA simplificado,true
+scn_combustible_choque,model_combustible,Choque alcista,Escenario con tendencia alcista sobre el combustible,false
+scn_arima_estres,model_arima,Stress,Escenario con forecast conservador,false
+scn_arima_upside,model_arima,Upside operativo,Mejor demanda y mejor precio unitario,false
+scn_agro_base,model_agro,Base,Escenario base agro exportacion,true
+scn_agro_sequia,model_agro,Sequia,Menor lluvia y menor rendimiento,false
+scn_expansion_base,model_expansion,Base,Escenario base de expansion,true
+scn_expansion_agresiva,model_expansion,Expansion agresiva,Mas aperturas y mayor capex,false
+scn_holding_base,model_holding,Base,Escenario base consolidado,true
+scn_holding_sinergias,model_holding,Sinergias,Mayor eficiencia corporativa consolidada,false

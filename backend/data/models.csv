@@ -1,0 +1,8 @@
+id,name,frequency,actuals_end_period_key,forecast_end_period_key
+model_ventas,Modelo demanda retail,monthly,2025-12,2026-12
+model_combustible,Modelo combustible estacional,monthly,2025-12,2026-12
+model_macro,Modelo macro suavizado,monthly,2025-12,2026-12
+model_arima,Modelo rentabilidad ARIMA simplificado,monthly,2025-12,2026-12
+model_agro,Modelo agro exportacion,monthly,2025-12,2026-12
+model_expansion,Modelo expansion tiendas,monthly,2025-12,2026-12
+model_holding,Modelo holding consolidado,monthly,2025-12,2026-12

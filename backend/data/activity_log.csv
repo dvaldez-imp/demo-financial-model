@@ -1,0 +1,21 @@
+id,timestamp,user,user_initials,user_color,action_type,target_type,target_name,model_name,description,detail
+seed_log_01,2026-04-29T14:52:00+00:00,Danval Valdez,DV,#003865,guardar,modelo,Modelo holding consolidado,Modelo holding consolidado,Guardó cambios en el modelo,"Timeline actualizado: actuals hasta 2025-12, forecast hasta 2026-12"
+seed_log_02,2026-04-29T14:38:00+00:00,Danval Valdez,DV,#003865,editar,celda,Inflacion bienes importados,Modelo macro suavizado,Editó valores en premisa,Periodos 2026-01 al 2026-06 modificados
+seed_log_03,2026-04-29T13:15:00+00:00,Sofia Reyes,SR,#7c3aed,crear,premisa,Costo corporativo ajustado,Modelo holding consolidado,Creó nueva premisa,Unidad: Q · Categoría: Costo
+seed_log_04,2026-04-29T13:02:00+00:00,Sofia Reyes,SR,#7c3aed,escenario,escenario,Sinergias,Modelo holding consolidado,Creó nuevo escenario,Mayor eficiencia corporativa consolidada
+seed_log_05,2026-04-29T11:47:00+00:00,Mateo Guzman,MG,#0891b2,prediccion,prediccion,Demanda operativa,Modelo rentabilidad ARIMA simplificado,Cambió método de predicción,Método anterior: Manual → ARIMA (lookback: 24 periodos)
+seed_log_06,2026-04-29T11:30:00+00:00,Mateo Guzman,MG,#0891b2,importar,grid,Modelo demanda retail,Modelo demanda retail,Importó grilla desde Excel,14 premisas nuevas · 3 actualizadas
+seed_log_07,2026-04-29T10:05:00+00:00,Lucia Perez,LP,#fc4c02,eliminar,premisa,Costo Financiero Bruto (Deprecado),Modelo holding consolidado,Eliminó premisa del modelo,
+seed_log_08,2026-04-28T18:20:00+00:00,Danval Valdez,DV,#003865,crear,premisa,EBITDA,Modelo rentabilidad ARIMA simplificado,Creó nueva premisa,Unidad: Q · Categoría: Resultado
+seed_log_09,2026-04-28T17:45:00+00:00,Sofia Reyes,SR,#7c3aed,editar,timeline,Modelo agro exportacion,Modelo agro exportacion,Actualizó timeline del modelo,Forecast extendido a 2027-12
+seed_log_10,2026-04-28T16:10:00+00:00,Mateo Guzman,MG,#0891b2,prediccion,prediccion,Precio unitario,Modelo rentabilidad ARIMA simplificado,Configuró override en escenario,Escenario: Upside operativo · Método: growth_rate_pct (3.6%)
+seed_log_11,2026-04-28T14:55:00+00:00,Lucia Perez,LP,#fc4c02,guardar,modelo,Modelo macro suavizado,Modelo macro suavizado,Guardó cambios en el modelo,
+seed_log_12,2026-04-28T13:30:00+00:00,Danval Valdez,DV,#003865,escenario,escenario,Upside comercial,Modelo demanda retail,Creó nuevo escenario,Mayor traccion comercial y mejor ticket
+seed_log_13,2026-04-27T17:00:00+00:00,Sofia Reyes,SR,#7c3aed,importar,grid,Modelo combustible estacional,Modelo combustible estacional,Importó grilla desde Excel,22 premisas nuevas · 0 actualizadas
+seed_log_14,2026-04-27T11:20:00+00:00,Lucia Perez,LP,#fc4c02,eliminar,premisa,Indice de flete regional (v1),Modelo combustible estacional,Eliminó premisa del modelo,
+seed_log_15,2026-04-27T09:45:00+00:00,Mateo Guzman,MG,#0891b2,crear,premisa,Costo ruta norte,Modelo combustible estacional,Creó nueva premisa,Unidad: Q · Categoría: Resultado
+seed_log_16,2026-04-26T15:30:00+00:00,Danval Valdez,DV,#003865,prediccion,prediccion,Demanda retail exportada,Modelo demanda retail,Cambió método de predicción,Método anterior: carry_forward → linear_trend (lookback: 12 periodos)
+seed_log_17,2026-04-26T12:10:00+00:00,Sofia Reyes,SR,#7c3aed,crear,premisa,Tipo de cambio USD/GTQ,Modelo macro suavizado,Creó nueva premisa desde librería,Fuente: librería · Unidad: Q/USD · Categoría: Macro
+seed_log_18,2026-04-25T16:45:00+00:00,Lucia Perez,LP,#fc4c02,editar,celda,Lluvia acumulada,Modelo agro exportacion,Editó valores en premisa,Periodos 2026-01 al 2026-12 modificados
+seed_log_19,2026-04-25T11:20:00+00:00,Mateo Guzman,MG,#0891b2,escenario,escenario,Sequia,Modelo agro exportacion,Creó nuevo escenario,Menor lluvia y menor rendimiento proyectado
+seed_log_20,2026-04-24T09:00:00+00:00,Danval Valdez,DV,#003865,importar,grid,Modelo expansion tiendas,Modelo expansion tiendas,Importó grilla desde Excel,8 premisas nuevas · 2 actualizadas

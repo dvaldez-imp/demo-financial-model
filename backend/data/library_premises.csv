@@ -1,0 +1,5 @@
+id,name,normalized_name,variable_name,unit,category,prediction_json
+lib_gasolina,Gasolina regular,gasolina regular,gasolina,Q/gal,Costo,"{""method"": ""seasonal_naive"", ""params"": {""season_length"": 12}, ""forecast_start_period_key"": ""2026-01"", ""forecast_end_period_key"": ""2026-12""}"
+lib_tipo_cambio,Tipo de cambio USD/GTQ,tipo de cambio usd gtq,tipo_cambio,Q/USD,Macro,"{""method"": ""moving_average"", ""params"": {""window"": 4}, ""forecast_start_period_key"": ""2026-01"", ""forecast_end_period_key"": ""2026-12""}"
+lib_diesel,Diesel flotilla,diesel flotilla,diesel,Q/gal,Costo,"{""method"": ""seasonal_naive"", ""params"": {""season_length"": 12}, ""forecast_start_period_key"": ""2026-01"", ""forecast_end_period_key"": ""2026-12""}"
+lib_resina_usd,Resina importada USD,resina importada usd,resina_usd,USD/ton,Macro,"{""method"": ""linear_trend"", ""params"": {""lookback_periods"": 12}, ""forecast_start_period_key"": ""2026-01"", ""forecast_end_period_key"": ""2026-12""}"

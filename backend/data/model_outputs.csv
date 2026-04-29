@@ -1,0 +1,5 @@
+id,model_id,name,display_name,source_premise_id,source_metric_key,description,active
+out_ventas_ingreso_neto,model_ventas,ingreso_neto_retail,Ingreso neto retail,prem_ventas_ingreso_neto,,Output consolidable del modelo retail,true
+out_agro_ingreso,model_agro,ingreso_cafe,Ingreso cafe exportacion,prem_agro_ingreso,,Output consolidable del modelo agro,true
+out_expansion_flujo,model_expansion,flujo_expansion,Flujo expansion,prem_expansion_flujo,,Output consolidable del modelo expansion,true
+out_arima_resultado_operacion,model_arima,resultado_operacion,Resultado operacion,prem_arima_resultado_operacion,,Salida reutilizable del mini-modelo ARIMA simplificado,true
