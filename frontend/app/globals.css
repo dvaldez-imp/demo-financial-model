@@ -1,0 +1,232 @@
+@import "tailwindcss";
+@import "react-grid-layout/css/styles.css";
+@import "react-resizable/css/styles.css";
+@layer theme, base, mui, components, utilities;
+
+:root {
+  --background: #f6f6f6;
+  --background-strong: #ffffff;
+  --surface: #ffffff;
+  --surface-strong: #ffffff;
+  --surface-muted: #fbfbfb;
+  --foreground: #151515;
+  --foreground-muted: #737373;
+  --heading: #003865;
+  --border: #d2d2d2;
+  --border-strong: #a6a6a6;
+  --accent: #003865;
+  --accent-strong: #1f5a8c;
+  --accent-secondary: #fc4c02;
+  --accent-soft: rgba(0, 56, 101, 0.14);
+  --accent-secondary-soft: rgba(252, 76, 2, 0.14);
+  --focus-ring: rgba(55, 129, 206, 0.34);
+  --success: #05a53c;
+  --warning: #ffac12;
+  --danger: #b71414;
+  --info: #3781ce;
+  --shadow-soft: 0 18px 40px rgba(0, 56, 101, 0.07);
+  --shadow-card: 0 12px 28px rgba(21, 21, 21, 0.05);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-plex-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(31, 90, 140, 0.08),
+      transparent 22%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--background) 100%);
+  color: var(--foreground);
+  font-family: var(--font-poppins), sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: rgba(55, 129, 206, 0.24);
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: transparent;
+}
+
+.panel-surface {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(210, 210, 210, 0.94);
+  box-shadow: var(--shadow-soft);
+}
+
+.card-outline {
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-card);
+}
+
+.subtle-ring {
+  box-shadow: var(--shadow-card);
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  z-index: 100;
+  transform: translateY(-140%);
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+.grid-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.grid-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.grid-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+.grid-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.subtle-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(115, 115, 115, 0.45) transparent;
+}
+
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(115, 115, 115, 0.45);
+  border-radius: 999px;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(115, 115, 115, 0.62);
+}
+
+.board-grid-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.board-grid-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.numeric-cell {
+  font-family: var(--font-plex-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes boardYearCollapse {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+    transform-origin: left center;
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 0.38;
+    transform: translateX(-4px) scaleX(0.985);
+    transform-origin: left center;
+    filter: blur(0);
+  }
+}
+
+@keyframes boardYearExpand {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.92);
+    transform-origin: left center;
+    filter: blur(1px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left center;
+    filter: blur(0);
+  }
+}
+
+.animate-board-year-collapse {
+  animation: boardYearCollapse 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-board-year-expand {
+  animation: boardYearExpand 260ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
