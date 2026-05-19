@@ -52,6 +52,7 @@ describe("PremiseLibraryPanel", () => {
         onCreatePremise={vi.fn()}
         onAddPremise={onAddPremise}
         onAddModelOutput={vi.fn()}
+        onDeletePremise={vi.fn()}
       />,
     );
 
@@ -77,6 +78,7 @@ describe("PremiseLibraryPanel", () => {
         onCreatePremise={vi.fn()}
         onAddPremise={vi.fn()}
         onAddModelOutput={onAddModelOutput}
+        onDeletePremise={vi.fn()}
       />,
     );
 

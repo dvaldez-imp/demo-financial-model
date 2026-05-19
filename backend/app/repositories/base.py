@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from app.schemas.domain import (
     ActivityLogRecord,
+    CompositePremiseModeRecord,
     DependencyEdgeRecord,
     LibraryPremiseRecord,
     ModelOutputRecord,
@@ -11,8 +12,9 @@ from app.schemas.domain import (
     ModelRecord,
     PeriodRecord,
     PredictionConfig,
+    PremiseModeRecord,
     PremiseValueRecord,
-    ScenarioPremiseOverrideRecord,
+    ScenarioPremiseModeRecord,
     ScenarioRecord,
 )
 
@@ -125,19 +127,6 @@ class FinancialRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_prediction_overrides(self, scenario_id: str) -> dict[str, PredictionConfig]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_prediction_overrides(
-        self,
-        *,
-        scenario_id: str,
-        overrides: dict[str, PredictionConfig | None],
-    ) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
     def list_values_for_model(self, model_id: str) -> list[PremiseValueRecord]:
         raise NotImplementedError
 
@@ -197,4 +186,85 @@ class FinancialRepository(ABC):
 
     @abstractmethod
     def create_activity_log_entry(self, *, entry: ActivityLogRecord) -> ActivityLogRecord:
+        raise NotImplementedError
+
+    # ── Primitive premise modes ───────────────────────────────────────────────
+
+    @abstractmethod
+    def list_premise_modes(self, premise_id: str) -> list[PremiseModeRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_premise_mode(self, mode_id: str) -> PremiseModeRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_premise_mode(self, *, mode: PremiseModeRecord) -> PremiseModeRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_premise_mode(self, *, mode_id: str, changes: dict[str, object]) -> PremiseModeRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_premise_mode(self, *, mode_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_default_premise_mode(self, *, premise_id: str, mode_id: str) -> bool:
+        raise NotImplementedError
+
+    # ── Composite premise modes ───────────────────────────────────────────────
+
+    @abstractmethod
+    def list_composite_premise_modes(self, premise_id: str) -> list[CompositePremiseModeRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_composite_premise_mode(self, mode_id: str) -> CompositePremiseModeRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_composite_premise_mode(self, *, mode: CompositePremiseModeRecord) -> CompositePremiseModeRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_composite_premise_mode(self, *, mode_id: str, changes: dict[str, object]) -> CompositePremiseModeRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_composite_premise_mode(self, *, mode_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_default_composite_premise_mode(self, *, premise_id: str, mode_id: str) -> bool:
+        raise NotImplementedError
+
+    # ── Scenario ↔ premise mode selections ───────────────────────────────────
+
+    @abstractmethod
+    def get_scenario_premise_modes(self, scenario_id: str) -> dict[str, str]:
+        """Returns {premise_id: mode_id} for all explicit mode overrides in the scenario."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_scenario_premise_mode(self, *, scenario_id: str, premise_id: str, mode_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_scenario_premise_mode(self, *, scenario_id: str, premise_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_effective_prediction_config(
+        self,
+        *,
+        premise_id: str,
+        scenario_id: str,
+        fallback: PredictionConfig,
+    ) -> PredictionConfig:
+        """Resolves the active prediction config for a primitive premise in a scenario.
+
+        Priority: scenario_premise_modes → default mode → fallback.
+        """
         raise NotImplementedError

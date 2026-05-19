@@ -5,7 +5,6 @@ import type {
   BoardResponse,
   BoardValue,
   PredictionConfig,
-  PredictionConfigOut,
   ValueOrigin,
 } from "@/lib/types/api";
 import type { BoardBanner, RailTab, TimelineDraft } from "@/lib/types/board";
@@ -36,7 +35,6 @@ type UseBoardDraftResult = {
   updatePremisePrediction: (
     premiseId: string,
     prediction: PredictionConfig,
-    mode: "base" | "override",
   ) => void;
 };
 
@@ -53,12 +51,6 @@ function cloneBoard(board: BoardResponse): BoardResponse {
         ...premise.prediction_base,
         params: { ...premise.prediction_base.params },
       },
-      prediction_override: premise.prediction_override
-        ? {
-            ...premise.prediction_override,
-            params: { ...premise.prediction_override.params },
-          }
-        : null,
       values: premise.values.map((value) => ({ ...value })),
     })),
   };
@@ -117,17 +109,6 @@ function buildBoardValue(
   };
 }
 
-function getActivePrediction(
-  premise: BoardResponse["premises"][number],
-  mode: "base" | "override",
-  nextPrediction?: PredictionConfig,
-): PredictionConfig | PredictionConfigOut {
-  if (mode === "override") {
-    return nextPrediction || premise.prediction_override || premise.prediction_base;
-  }
-
-  return premise.prediction_override || nextPrediction || premise.prediction_base;
-}
 
 export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult {
   const initialTimeline = getInitialTimelineFromPeriods(initialBoard.periods);
@@ -220,8 +201,7 @@ export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult 
           return premise;
         }
 
-        const activePrediction =
-          premise.prediction_override || premise.prediction_base;
+        const activePrediction = premise.prediction_base;
         const valueOrigin: ValueOrigin =
           activePrediction.method === "manual"
             ? "forecast_manual"
@@ -246,7 +226,6 @@ export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult 
   function updatePremisePrediction(
     premiseId: string,
     prediction: PredictionConfig,
-    mode: "base" | "override",
   ) {
     setBoard((current) => ({
       ...current,
@@ -255,13 +234,6 @@ export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult 
           return premise;
         }
 
-        const nextPrediction = {
-          method: prediction.method,
-          params: prediction.params,
-          forecast_start_period_key: prediction.forecast_start_period_key ?? null,
-          forecast_end_period_key: prediction.forecast_end_period_key ?? null,
-        };
-        const activePrediction = getActivePrediction(premise, mode, nextPrediction);
         const existingValues = new Map(
           premise.values.map((value) => [value.period_key, value]),
         );
@@ -270,7 +242,7 @@ export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult 
           .map((period) => {
             const existing = existingValues.get(period.key);
 
-            if (activePrediction.method === "manual") {
+            if (prediction.method === "manual") {
               return buildBoardValue(
                 period.key,
                 existing?.value ?? null,
@@ -301,26 +273,12 @@ export function useBoardDraft(initialBoard: BoardResponse): UseBoardDraftResult 
           left.period_key.localeCompare(right.period_key),
         );
 
-        if (mode === "base") {
-          return {
-            ...premise,
-            prediction_base: {
-              ...premise.prediction_base,
-              ...prediction,
-              method_label: getPredictionMethodLabel(prediction.method),
-            },
-            values: nextValues,
-          };
-        }
-
         return {
           ...premise,
-          prediction_override: {
+          prediction_base: {
+            ...premise.prediction_base,
+            ...prediction,
             method_label: getPredictionMethodLabel(prediction.method),
-            method: prediction.method,
-            params: prediction.params,
-            forecast_start_period_key: prediction.forecast_start_period_key ?? null,
-            forecast_end_period_key: prediction.forecast_end_period_key ?? null,
           },
           values: nextValues,
         };

@@ -4,9 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { compileFormulaExpression } from "@/lib/utils/formula-compiler";
+import PremiseModeManager from "@/components/model-board/PremiseModeManager";
+import { updatePremiseMode } from "@/lib/api/premise-modes";
 import type {
   BoardPremise,
   PredictionConfig,
+  PremiseMode,
   YearSummaryMethod,
 } from "@/lib/types/api";
 import {
@@ -491,12 +494,12 @@ type PredictionConfigPanelProps = {
   availableVariables: string[];
   formulaCandidates: FormulaCandidate[];
   scenarioName: string;
+  scenarioId: string;
   isBaseScenario: boolean;
   pending?: boolean;
   onSaveBase: (prediction: PredictionConfig) => Promise<void> | void;
-  onSaveOverride: (prediction: PredictionConfig) => Promise<void> | void;
   onSaveYearSummaryMethod: (method: YearSummaryMethod) => Promise<void> | void;
-  onClearOverride: () => Promise<void> | void;
+  onModeChanged?: () => void;
 };
 
 const YEAR_METHOD_OPTIONS: Array<{ value: YearSummaryMethod; label: string }> =
@@ -512,42 +515,65 @@ export default function PredictionConfigPanel({
   forecastEndPeriodKey,
   formulaCandidates,
   isBaseScenario,
-  onClearOverride,
+  onModeChanged,
   onSaveBase,
-  onSaveOverride,
   pending = false,
   premise,
+  scenarioId,
   scenarioName,
   onSaveYearSummaryMethod,
 }: PredictionConfigPanelProps) {
+  const [editingModeId, setEditingModeId] = useState<string | null>(null);
+  const [modeSaving, setModeSaving] = useState(false);
+
   if (!premise) {
     return (
-      <div className="rounded-[24px] border border-dashed border-[var(--border-strong)] bg-white p-5 text-sm text-[var(--foreground-muted)]">
+      <div className="rounded-3xl border border-dashed border-(--border-strong) bg-white p-5 text-sm text-(--foreground-muted)">
         Selecciona una premisa para editar su logica de proyeccion.
       </div>
     );
   }
 
+  const editingMode: PremiseMode | undefined = premise.modes.find(
+    (m) => m.id === editingModeId,
+  );
+  const hasModes = premise.modes.length > 0;
+  const defaultModeName =
+    premise.modes.find((m) => m.is_default)?.name ?? "Base";
+
+  async function handleSaveModeConfig(config: PredictionConfig) {
+    if (!editingMode) return;
+    setModeSaving(true);
+    try {
+      await updatePremiseMode(premise!.id, editingMode.id, {
+        prediction_config: config,
+      });
+      onModeChanged?.();
+    } finally {
+      setModeSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="rounded-[24px] border border-[var(--border)] bg-white p-4">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--foreground-muted)]">
+      <div className="rounded-3xl border border-(--border) bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-(--foreground-muted)">
           Premisa seleccionada
         </p>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-[var(--foreground)]">
+        <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
           {premise.name}
         </h2>
-        <p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">
+        <p className="mt-2 text-sm leading-6 text-(--foreground-muted)">
           {premise.unit ? `${premise.unit} / ` : ""}
           {premise.category || "Sin categoria"}
         </p>
-        <p className="mt-1 text-xs text-[var(--foreground-muted)]">
+        <p className="mt-1 text-xs text-(--foreground-muted)">
           Variable:{" "}
           <span className="font-mono">
             {premise.variable_name || "sin_variable"}
           </span>
         </p>
-        <p className="mt-2 text-xs leading-5 text-[var(--foreground-muted)]">
+        <p className="mt-2 text-xs leading-5 text-(--foreground-muted)">
           Timeline activo: historico hasta{" "}
           {formatPeriodShortLabel(actualsEndPeriodKey)} y proyeccion hasta{" "}
           {formatPeriodShortLabel(forecastEndPeriodKey)}.
@@ -555,7 +581,11 @@ export default function PredictionConfigPanel({
       </div>
 
       <PredictionConfigForm
-        title="Prediccion base"
+        title={
+          hasModes
+            ? `Modo predeterminado · ${defaultModeName}`
+            : "Prediccion base"
+        }
         prediction={premise.prediction_base}
         actualsEndPeriodKey={actualsEndPeriodKey}
         forecastEndPeriodKey={forecastEndPeriodKey}
@@ -565,11 +595,11 @@ export default function PredictionConfigPanel({
         onSave={onSaveBase}
       />
 
-      <section className="rounded-[24px] border border-[var(--border)] bg-white p-4">
-        <h3 className="text-sm font-semibold text-[var(--foreground)]">
+      <section className="rounded-3xl border border-(--border) bg-white p-4">
+        <h3 className="text-sm font-semibold text-foreground">
           Resumen anual
         </h3>
-        <p className="mt-1 text-xs leading-5 text-[var(--foreground-muted)]">
+        <p className="mt-1 text-xs leading-5 text-(--foreground-muted)">
           El valor anual se calcula en backend. Aqui defines la regla por
           premisa.
         </p>
@@ -588,52 +618,36 @@ export default function PredictionConfigPanel({
               </option>
             ))}
           </Select>
-          <p className="rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--foreground-muted)]">
+          <p className="rounded-xl bg-(--surface-muted) px-3 py-2 text-sm text-(--foreground-muted)">
             Actual: {premise.year_summary_method_label}
           </p>
         </div>
       </section>
 
-      {!isBaseScenario ? (
-        premise.prediction_override ? (
-          <div className="space-y-3 rounded-[24px] border border-[var(--border)] bg-[rgba(20,89,199,0.05)] p-4">
-            <PredictionConfigForm
-              title={`Override para ${scenarioName}`}
-              prediction={premise.prediction_override}
-              actualsEndPeriodKey={actualsEndPeriodKey}
-              forecastEndPeriodKey={forecastEndPeriodKey}
-              knownVariables={availableVariables}
-              formulaCandidates={formulaCandidates}
-              pending={pending}
-              onSave={onSaveOverride}
-            />
-            <div className="flex justify-end">
-              <Button size="sm" variant="ghost" onClick={onClearOverride}>
-                Limpiar override
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-[24px] border border-dashed border-[var(--border-strong)] bg-white p-4">
-            <p className="text-sm text-[var(--foreground-muted)]">
-              No hay override para el escenario {scenarioName}. Puedes crear uno
-              guardando una configuracion especifica para esta premisa.
-            </p>
-            <div className="mt-3">
-              <PredictionConfigForm
-                title={`Nuevo override para ${scenarioName}`}
-                prediction={premise.prediction_base}
-                actualsEndPeriodKey={actualsEndPeriodKey}
-                forecastEndPeriodKey={forecastEndPeriodKey}
-                knownVariables={availableVariables}
-                formulaCandidates={formulaCandidates}
-                pending={pending}
-                onSave={onSaveOverride}
-              />
-            </div>
-          </div>
-        )
-      ) : null}
+      <section className="rounded-3xl border border-(--border) bg-white p-4">
+        <PremiseModeManager
+          premise={premise}
+          scenarioId={scenarioId}
+          isBaseScenario={isBaseScenario}
+          editingModeId={editingModeId}
+          onEditConfig={setEditingModeId}
+          onModeChanged={onModeChanged}
+        />
+      </section>
+
+      {editingMode && (
+        <PredictionConfigForm
+          key={editingMode.id}
+          title={`Configurando modo · ${editingMode.name}`}
+          prediction={editingMode.prediction_config}
+          actualsEndPeriodKey={actualsEndPeriodKey}
+          forecastEndPeriodKey={forecastEndPeriodKey}
+          knownVariables={availableVariables}
+          formulaCandidates={formulaCandidates}
+          pending={modeSaving}
+          onSave={handleSaveModeConfig}
+        />
+      )}
     </div>
   );
 }

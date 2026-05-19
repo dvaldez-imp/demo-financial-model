@@ -29,7 +29,6 @@ import {
   updateModelTimeline,
 } from "@/lib/api/models";
 import {
-  buildScenarioOverridePayload,
   updatePremisePredictionConfig,
   updatePremiseYearSummaryConfig,
 } from "@/lib/api/scenarios";
@@ -411,7 +410,7 @@ export default function ModelBoardScreen({
 
     try {
       const alignedPrediction = alignPredictionToBoardTimeline(prediction);
-      updatePremisePrediction(editingPremise.id, alignedPrediction, "base");
+      updatePremisePrediction(editingPremise.id, alignedPrediction);
       await updatePremisePredictionConfig(editingPremise.id, {
         base: alignedPrediction,
       });
@@ -422,61 +421,6 @@ export default function ModelBoardScreen({
         error instanceof Error
           ? error.message
           : "No se pudo guardar la prediccion.";
-      setBanner({ tone: "error", message });
-    } finally {
-      setPredictionSaving(false);
-    }
-  }
-
-  async function handleSavePredictionOverride(prediction: PredictionConfig) {
-    if (!editingPremise || isBaseScenario) {
-      return;
-    }
-
-    setPredictionSaving(true);
-
-    try {
-      const alignedPrediction = alignPredictionToBoardTimeline(prediction);
-      updatePremisePrediction(editingPremise.id, alignedPrediction, "override");
-      await updatePremisePredictionConfig(
-        editingPremise.id,
-        buildScenarioOverridePayload(
-          board.selected_scenario_id,
-          alignedPrediction,
-        ),
-      );
-      await refreshBoard(board.selected_scenario_id);
-      setBanner({ tone: "success", message: "Override actualizado." });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "No se pudo guardar el override.";
-      setBanner({ tone: "error", message });
-    } finally {
-      setPredictionSaving(false);
-    }
-  }
-
-  async function handleClearPredictionOverride() {
-    if (!editingPremise || isBaseScenario) {
-      return;
-    }
-
-    setPredictionSaving(true);
-
-    try {
-      await updatePremisePredictionConfig(
-        editingPremise.id,
-        buildScenarioOverridePayload(board.selected_scenario_id, null),
-      );
-      await refreshBoard(board.selected_scenario_id);
-      setBanner({ tone: "success", message: "Override limpiado." });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "No se pudo limpiar el override.";
       setBanner({ tone: "error", message });
     } finally {
       setPredictionSaving(false);
@@ -752,12 +696,12 @@ export default function ModelBoardScreen({
           availableVariables={availableVariables}
           formulaCandidates={formulaCandidates}
           scenarioName={currentScenarioName}
+          scenarioId={board.selected_scenario_id}
           isBaseScenario={isBaseScenario}
           pending={predictionSaving}
           onSaveBase={handleSavePredictionBase}
-          onSaveOverride={handleSavePredictionOverride}
           onSaveYearSummaryMethod={handleSaveYearSummaryMethod}
-          onClearOverride={handleClearPredictionOverride}
+          onModeChanged={() => refreshBoard(board.selected_scenario_id)}
         />
       </Modal>
 

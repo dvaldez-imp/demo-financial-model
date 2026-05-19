@@ -63,7 +63,11 @@ const boardFixture: BoardResponse = {
         forecast_end_period_key: "2025-12",
         method_label: "Manual",
       },
-      prediction_override: null,
+      modes: [],
+      composite_modes: [],
+      active_mode_id: null,
+      year_summary_method: "sum" as const,
+      year_summary_method_label: "Suma",
       values: [
         {
           period_key: "2025-01",

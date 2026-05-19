@@ -20,7 +20,7 @@ from app.schemas.api import (
     UpdateScenarioRequest,
     UpdateTimelineRequest,
 )
-from app.schemas.domain import LibraryPremiseRecord, ModelPremiseRecord, ModelRecord, PredictionConfig, PremiseValueRecord, ScenarioRecord
+from app.schemas.domain import CompositePremiseModeRecord, LibraryPremiseRecord, ModelPremiseRecord, ModelRecord, PredictionConfig, PremiseModeRecord, PremiseValueRecord, ScenarioRecord
 from app.services.ids import generate_id
 from app.services.period_parser import is_valid_variable_name, normalize_text, to_variable_name
 from app.services.premise_values import PremiseValueResolver
@@ -316,6 +316,22 @@ def create_model_premise(
         )
 
     repository.create_model_premise(premise=record)
+    if record.dependency_type == "none":
+        repository.create_premise_mode(mode=PremiseModeRecord(
+            id=generate_id("mode"),
+            premise_id=record.id,
+            name="Base",
+            is_default=True,
+            prediction_config=record.prediction_base,
+        ))
+    else:
+        repository.create_composite_premise_mode(mode=CompositePremiseModeRecord(
+            id=generate_id("cmode"),
+            premise_id=record.id,
+            name="Base",
+            is_default=True,
+            overrides=[],
+        ))
     if record.prediction_base.method == "formula_placeholder":
         expression = str(record.prediction_base.params.get("expression", ""))
         sync_formula_dependencies(
@@ -386,6 +402,13 @@ def update_prediction_config(
             premise_id=premise_id,
             changes={"prediction_base": updated_prediction},
         )
+        # Keep the default mode in sync with prediction_base
+        default_modes = [m for m in repository.list_premise_modes(premise_id) if m.is_default]
+        if default_modes:
+            repository.update_premise_mode(
+                mode_id=default_modes[0].id,
+                changes={"prediction_config": updated_prediction},
+            )
         if updated_prediction.method == "formula_placeholder":
             sync_formula_dependencies(
                 repository,
@@ -401,28 +424,6 @@ def update_prediction_config(
                 premise=premise,
                 scenario_id=base_scenario.id,
                 rendered_values=base_values_to_materialize,
-            )
-
-    if payload.scenario_override is not None:
-        scenario = repository.get_scenario(payload.scenario_override.scenario_id)
-        if scenario is None or scenario.model_id != premise.model_id:
-            raise HTTPException(status_code=400, detail="Scenario does not belong to the premise model.")
-        override_config = PredictionConfig.model_validate(payload.scenario_override.model_dump(exclude={"scenario_id"}))
-        _validate_prediction_window(override_config)
-        current_override = repository.get_prediction_overrides(scenario.id).get(premise_id, premise.prediction_base)
-        override_values_to_materialize = None
-        if override_config.method == "manual" and current_override.method != "manual":
-            override_values_to_materialize = resolver.resolve(premise, scenario.id)
-        repository.upsert_prediction_overrides(
-            scenario_id=scenario.id,
-            overrides={premise_id: _with_model_forecast_window(model, override_config)},
-        )
-        if override_values_to_materialize is not None:
-            _materialize_forecast_as_manual(
-                repository,
-                premise=premise,
-                scenario_id=scenario.id,
-                rendered_values=override_values_to_materialize,
             )
 
     updated = repository.get_model_premise(premise_id)

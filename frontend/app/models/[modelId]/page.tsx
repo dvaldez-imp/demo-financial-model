@@ -318,8 +318,7 @@ export default async function ModelPage(props: PageProps<"/models/[modelId]">) {
                     <div className="flex items-start justify-between gap-4">
                       <dt className="text-[var(--foreground-muted)]">Método</dt>
                       <dd className="max-w-[65%] text-right font-medium text-[var(--foreground)]">
-                        {premise.prediction_override?.method_label ||
-                          premise.prediction_base.method_label}
+                        {premise.prediction_base.method_label}
                       </dd>
                     </div>
                   </dl>

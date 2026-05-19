@@ -7,6 +7,7 @@ from pathlib import Path
 from app.repositories.base import FinancialRepository
 from app.schemas.domain import (
     ActivityLogRecord,
+    CompositePremiseModeRecord,
     DependencyEdgeRecord,
     LibraryPremiseRecord,
     ModelOutputRecord,
@@ -14,7 +15,9 @@ from app.schemas.domain import (
     ModelRecord,
     PeriodRecord,
     PredictionConfig,
+    PremiseModeRecord,
     PremiseValueRecord,
+    ScenarioPremiseModeRecord,
     ScenarioRecord,
 )
 from app.services.period_parser import sort_periods
@@ -41,7 +44,6 @@ FILE_FIELDS = {
     ],
     "periods.csv": ["model_id", "key", "label", "type", "year", "month", "zone"],
     "scenarios.csv": ["id", "model_id", "name", "description", "is_base"],
-    "scenario_overrides.csv": ["scenario_id", "premise_id", "prediction_override_json"],
     "premise_values.csv": ["premise_id", "period_key", "scenario_id", "value", "value_origin", "editable"],
     "model_outputs.csv": [
         "id",
@@ -58,6 +60,9 @@ FILE_FIELDS = {
         "id", "timestamp", "user", "user_initials", "user_color",
         "action_type", "target_type", "target_name", "model_name", "description", "detail",
     ],
+    "premise_modes.csv": ["id", "premise_id", "name", "is_default", "prediction_config_json"],
+    "composite_premise_modes.csv": ["id", "premise_id", "name", "is_default", "overrides_json", "inherited_from_mode_id"],
+    "scenario_premise_modes.csv": ["scenario_id", "premise_id", "mode_id"],
 }
 
 LEGACY_FIELDS = {
@@ -74,7 +79,6 @@ LEGACY_FIELDS = {
         "prediction_json",
     ],
     "model_periods.csv": ["model_id", "key", "label", "type", "year", "month"],
-    "scenario_prediction_overrides.csv": ["scenario_id", "premise_id", "prediction_json"],
     "values.csv": ["premise_id", "period_key", "scenario_id", "value", "cell_type"],
 }
 
@@ -93,6 +97,8 @@ class CsvFinancialRepository(FinancialRepository):
             self._seed_demo_data()
         elif seed_demo and not self._read_rows("activity_log.csv"):
             self._seed_activity_log()
+        # Auto-create Base modes for any existing premises that have none
+        self._ensure_premise_base_modes()
 
     def reset_data(self, *, seed_demo: bool = True) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -216,8 +222,10 @@ class CsvFinancialRepository(FinancialRepository):
         value_rows = self._read_rows("premise_values.csv")
         self._write_rows("premise_values.csv", [row for row in value_rows if row["premise_id"] != premise_id])
 
-        override_rows = self._read_rows("scenario_overrides.csv")
-        self._write_rows("scenario_overrides.csv", [row for row in override_rows if row["premise_id"] != premise_id])
+        # Remove premise modes and composite modes
+        self._write_rows("premise_modes.csv", [row for row in self._read_rows("premise_modes.csv") if row["premise_id"] != premise_id])
+        self._write_rows("composite_premise_modes.csv", [row for row in self._read_rows("composite_premise_modes.csv") if row["premise_id"] != premise_id])
+        self._write_rows("scenario_premise_modes.csv", [row for row in self._read_rows("scenario_premise_modes.csv") if row["premise_id"] != premise_id])
 
         edge_rows = self._read_rows("dependency_edges.csv")
         self._write_rows(
@@ -287,31 +295,6 @@ class CsvFinancialRepository(FinancialRepository):
             return None
         self._write_rows("scenarios.csv", rows)
         return updated
-
-    def get_prediction_overrides(self, scenario_id: str) -> dict[str, PredictionConfig]:
-        overrides: dict[str, PredictionConfig] = {}
-        for row in self._read_rows("scenario_overrides.csv"):
-            if row["scenario_id"] == scenario_id:
-                overrides[row["premise_id"]] = self._prediction_from_json(row["prediction_override_json"])
-        return overrides
-
-    def upsert_prediction_overrides(self, *, scenario_id: str, overrides: dict[str, PredictionConfig | None]) -> None:
-        rows = [row for row in self._read_rows("scenario_overrides.csv") if row["scenario_id"] != scenario_id]
-        current = self.get_prediction_overrides(scenario_id)
-        for premise_id, prediction in overrides.items():
-            if prediction is None:
-                current.pop(premise_id, None)
-            else:
-                current[premise_id] = prediction
-        rows.extend(
-            {
-                "scenario_id": scenario_id,
-                "premise_id": premise_id,
-                "prediction_override_json": self._prediction_to_json(prediction),
-            }
-            for premise_id, prediction in current.items()
-        )
-        self._write_rows("scenario_overrides.csv", rows)
 
     def list_values_for_model(self, model_id: str) -> list[PremiseValueRecord]:
         return self.list_values_for_premise_ids([premise.id for premise in self.list_model_premises(model_id)])
@@ -404,6 +387,220 @@ class CsvFinancialRepository(FinancialRepository):
         rows.append(self._activity_log_to_row(entry))
         self._write_rows("activity_log.csv", rows)
         return entry
+
+    # ── Primitive premise modes ───────────────────────────────────────────────
+
+    def list_premise_modes(self, premise_id: str) -> list[PremiseModeRecord]:
+        return [self._premise_mode_from_row(row) for row in self._read_rows("premise_modes.csv") if row["premise_id"] == premise_id]
+
+    def get_premise_mode(self, mode_id: str) -> PremiseModeRecord | None:
+        for row in self._read_rows("premise_modes.csv"):
+            if row["id"] == mode_id:
+                return self._premise_mode_from_row(row)
+        return None
+
+    def create_premise_mode(self, *, mode: PremiseModeRecord) -> PremiseModeRecord:
+        rows = self._read_rows("premise_modes.csv")
+        rows.append(self._premise_mode_to_row(mode))
+        self._write_rows("premise_modes.csv", rows)
+        return mode
+
+    def update_premise_mode(self, *, mode_id: str, changes: dict[str, object]) -> PremiseModeRecord | None:
+        rows = self._read_rows("premise_modes.csv")
+        updated: PremiseModeRecord | None = None
+        for row in rows:
+            if row["id"] != mode_id:
+                continue
+            updated = self._premise_mode_from_row(row)
+            for field, value in changes.items():
+                setattr(updated, field, value)
+            row.update(self._premise_mode_to_row(updated))
+            break
+        if updated is None:
+            return None
+        self._write_rows("premise_modes.csv", rows)
+        return updated
+
+    def delete_premise_mode(self, *, mode_id: str) -> bool:
+        rows = self._read_rows("premise_modes.csv")
+        if not any(row["id"] == mode_id for row in rows):
+            return False
+        self._write_rows("premise_modes.csv", [row for row in rows if row["id"] != mode_id])
+        sp_rows = self._read_rows("scenario_premise_modes.csv")
+        self._write_rows("scenario_premise_modes.csv", [row for row in sp_rows if row["mode_id"] != mode_id])
+        return True
+
+    def set_default_premise_mode(self, *, premise_id: str, mode_id: str) -> bool:
+        rows = self._read_rows("premise_modes.csv")
+        if not any(row["id"] == mode_id and row["premise_id"] == premise_id for row in rows):
+            return False
+        for row in rows:
+            if row["premise_id"] == premise_id:
+                row["is_default"] = "true" if row["id"] == mode_id else "false"
+        self._write_rows("premise_modes.csv", rows)
+        return True
+
+    # ── Composite premise modes ───────────────────────────────────────────────
+
+    def list_composite_premise_modes(self, premise_id: str) -> list[CompositePremiseModeRecord]:
+        return [self._composite_mode_from_row(row) for row in self._read_rows("composite_premise_modes.csv") if row["premise_id"] == premise_id]
+
+    def get_composite_premise_mode(self, mode_id: str) -> CompositePremiseModeRecord | None:
+        for row in self._read_rows("composite_premise_modes.csv"):
+            if row["id"] == mode_id:
+                return self._composite_mode_from_row(row)
+        return None
+
+    def create_composite_premise_mode(self, *, mode: CompositePremiseModeRecord) -> CompositePremiseModeRecord:
+        rows = self._read_rows("composite_premise_modes.csv")
+        rows.append(self._composite_mode_to_row(mode))
+        self._write_rows("composite_premise_modes.csv", rows)
+        return mode
+
+    def update_composite_premise_mode(self, *, mode_id: str, changes: dict[str, object]) -> CompositePremiseModeRecord | None:
+        rows = self._read_rows("composite_premise_modes.csv")
+        updated: CompositePremiseModeRecord | None = None
+        for row in rows:
+            if row["id"] != mode_id:
+                continue
+            updated = self._composite_mode_from_row(row)
+            for field, value in changes.items():
+                setattr(updated, field, value)
+            row.update(self._composite_mode_to_row(updated))
+            break
+        if updated is None:
+            return None
+        self._write_rows("composite_premise_modes.csv", rows)
+        return updated
+
+    def delete_composite_premise_mode(self, *, mode_id: str) -> bool:
+        rows = self._read_rows("composite_premise_modes.csv")
+        if not any(row["id"] == mode_id for row in rows):
+            return False
+        self._write_rows("composite_premise_modes.csv", [row for row in rows if row["id"] != mode_id])
+        sp_rows = self._read_rows("scenario_premise_modes.csv")
+        self._write_rows("scenario_premise_modes.csv", [row for row in sp_rows if row["mode_id"] != mode_id])
+        return True
+
+    def set_default_composite_premise_mode(self, *, premise_id: str, mode_id: str) -> bool:
+        rows = self._read_rows("composite_premise_modes.csv")
+        if not any(row["id"] == mode_id and row["premise_id"] == premise_id for row in rows):
+            return False
+        for row in rows:
+            if row["premise_id"] == premise_id:
+                row["is_default"] = "true" if row["id"] == mode_id else "false"
+        self._write_rows("composite_premise_modes.csv", rows)
+        return True
+
+    # ── Scenario ↔ premise mode selections ───────────────────────────────────
+
+    def get_scenario_premise_modes(self, scenario_id: str) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for row in self._read_rows("scenario_premise_modes.csv"):
+            if row["scenario_id"] == scenario_id:
+                result[row["premise_id"]] = row["mode_id"]
+        return result
+
+    def upsert_scenario_premise_mode(self, *, scenario_id: str, premise_id: str, mode_id: str) -> None:
+        rows = self._read_rows("scenario_premise_modes.csv")
+        by_key = {(row["scenario_id"], row["premise_id"]): row for row in rows}
+        by_key[(scenario_id, premise_id)] = {"scenario_id": scenario_id, "premise_id": premise_id, "mode_id": mode_id}
+        self._write_rows("scenario_premise_modes.csv", list(by_key.values()))
+
+    def remove_scenario_premise_mode(self, *, scenario_id: str, premise_id: str) -> None:
+        rows = self._read_rows("scenario_premise_modes.csv")
+        self._write_rows("scenario_premise_modes.csv", [
+            row for row in rows
+            if not (row["scenario_id"] == scenario_id and row["premise_id"] == premise_id)
+        ])
+
+    def get_effective_prediction_config(
+        self,
+        *,
+        premise_id: str,
+        scenario_id: str,
+        fallback: PredictionConfig,
+    ) -> PredictionConfig:
+        modes_by_id = {row["id"]: row for row in self._read_rows("premise_modes.csv") if row["premise_id"] == premise_id}
+
+        # 1. Check explicit scenario mode selection
+        for row in self._read_rows("scenario_premise_modes.csv"):
+            if row["scenario_id"] == scenario_id and row["premise_id"] == premise_id:
+                mode_row = modes_by_id.get(row["mode_id"])
+                if mode_row:
+                    return self._prediction_from_json(mode_row["prediction_config_json"])
+
+        # 2. Use the default mode
+        for mode_row in modes_by_id.values():
+            if mode_row["is_default"] == "true":
+                return self._prediction_from_json(mode_row["prediction_config_json"])
+
+        return fallback
+
+    # ── Internal: auto-seed Base modes ───────────────────────────────────────
+
+    def _ensure_premise_base_modes(self) -> None:
+        existing_prem = {row["premise_id"] for row in self._read_rows("premise_modes.csv")}
+        existing_comp = {row["premise_id"] for row in self._read_rows("composite_premise_modes.csv")}
+        for row in self._read_rows("premises.csv"):
+            premise = self._premise_from_row(row)
+            if premise.dependency_type == "none" and premise.id not in existing_prem:
+                self.create_premise_mode(mode=PremiseModeRecord(
+                    id=f"mode_{premise.id}_base",
+                    premise_id=premise.id,
+                    name="Base",
+                    is_default=True,
+                    prediction_config=premise.prediction_base,
+                ))
+            elif premise.dependency_type != "none" and premise.id not in existing_comp:
+                self.create_composite_premise_mode(mode=CompositePremiseModeRecord(
+                    id=f"cmode_{premise.id}_base",
+                    premise_id=premise.id,
+                    name="Base",
+                    is_default=True,
+                    overrides=[],
+                ))
+
+    # ── Row converters: modes ─────────────────────────────────────────────────
+
+    def _premise_mode_from_row(self, row: dict[str, str]) -> PremiseModeRecord:
+        return PremiseModeRecord(
+            id=row["id"],
+            premise_id=row["premise_id"],
+            name=row["name"],
+            is_default=row["is_default"] == "true",
+            prediction_config=self._prediction_from_json(row["prediction_config_json"]),
+        )
+
+    def _premise_mode_to_row(self, mode: PremiseModeRecord) -> dict[str, str]:
+        return {
+            "id": mode.id,
+            "premise_id": mode.premise_id,
+            "name": mode.name,
+            "is_default": "true" if mode.is_default else "false",
+            "prediction_config_json": self._prediction_to_json(mode.prediction_config),
+        }
+
+    def _composite_mode_from_row(self, row: dict[str, str]) -> CompositePremiseModeRecord:
+        overrides = json.loads(row["overrides_json"]) if row["overrides_json"] else []
+        return CompositePremiseModeRecord(
+            id=row["id"],
+            premise_id=row["premise_id"],
+            name=row["name"],
+            is_default=row["is_default"] == "true",
+            overrides=overrides,
+            inherited_from_mode_id=row["inherited_from_mode_id"] or None,
+        )
+
+    def _composite_mode_to_row(self, mode: CompositePremiseModeRecord) -> dict[str, str]:
+        return {
+            "id": mode.id,
+            "premise_id": mode.premise_id,
+            "name": mode.name,
+            "is_default": "true" if mode.is_default else "false",
+            "overrides_json": json.dumps(mode.overrides, ensure_ascii=False),
+            "inherited_from_mode_id": mode.inherited_from_mode_id or "",
+        }
 
     def _activity_log_from_row(self, row: dict[str, str]) -> ActivityLogRecord:
         return ActivityLogRecord(
@@ -505,18 +702,6 @@ class CsvFinancialRepository(FinancialRepository):
         for model_id, periods in periods_by_model.items():
             migrated_periods.extend(self._period_to_row(model_id, period) for period in periods)
 
-        migrated_overrides = [
-            {
-                "scenario_id": row["scenario_id"],
-                "premise_id": row["premise_id"],
-                "prediction_override_json": row["prediction_json"],
-            }
-            for row in self._read_rows_generic(
-                "scenario_prediction_overrides.csv",
-                LEGACY_FIELDS["scenario_prediction_overrides.csv"],
-            )
-        ]
-
         premise_model_index = {row["id"]: row["model_id"] for row in migrated_premises}
         actuals_by_model = {row["id"]: row["actuals_end_period_key"] or None for row in migrated_models}
         migrated_values = []
@@ -548,7 +733,6 @@ class CsvFinancialRepository(FinancialRepository):
         self._write_rows("premises.csv", migrated_premises)
         self._write_rows("periods.csv", migrated_periods)
         self._write_rows("scenarios.csv", self._read_rows_generic("scenarios.csv", FILE_FIELDS["scenarios.csv"]))
-        self._write_rows("scenario_overrides.csv", migrated_overrides)
         self._write_rows("premise_values.csv", migrated_values)
         self._write_rows("model_outputs.csv", [])
         self._write_rows("dependency_edges.csv", [])
@@ -1760,126 +1944,514 @@ class CsvFinancialRepository(FinancialRepository):
         ]:
             self.upsert_dependency_edge(edge=edge)
 
-        self.upsert_prediction_overrides(
-            scenario_id="scn_ventas_upside",
-            overrides={
-                "prem_ventas_demanda": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 5.4},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-                "prem_ventas_ticket_promedio": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 3.5},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_combustible_choque",
-            overrides={
-                "prem_combustible_gasolina": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 6.5},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_macro_depreciacion",
-            overrides={
-                "prem_macro_tipo_cambio": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 1.6},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-                "prem_macro_resina_usd": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 2.8},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_arima_estres",
-            overrides={
-                "prem_arima_demanda": PredictionConfig(
-                    method="carry_forward",
-                    params={},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_arima_upside",
-            overrides={
-                "prem_arima_demanda": PredictionConfig(
-                    method="linear_trend",
-                    params={"lookback_periods": 12},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-                "prem_arima_precio_unitario": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 3.6},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_agro_sequia",
-            overrides={
-                "prem_agro_lluvia": PredictionConfig(
-                    method="carry_forward",
-                    params={},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-                "prem_agro_cafe_volumen": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": -4.0},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_expansion_agresiva",
-            overrides={
-                "prem_expansion_tiendas": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 12.0},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-                "prem_expansion_capex_tienda": PredictionConfig(
-                    method="growth_rate_pct",
-                    params={"rate": 4.5},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-        self.upsert_prediction_overrides(
-            scenario_id="scn_holding_sinergias",
-            overrides={
-                "prem_holding_corporativo": PredictionConfig(
-                    method="carry_forward",
-                    params={},
-                    forecast_start_period_key=forecast_start,
-                    forecast_end_period_key=forecast_end,
-                ),
-            },
-        )
-
+        self._seed_premise_modes(forecast_start=forecast_start, forecast_end=forecast_end)
         self._seed_activity_log()
+
+    def _seed_premise_modes(self, *, forecast_start: str, forecast_end: str) -> None:
+        def cfg(method: str, params: dict | None = None, *, fs: str = forecast_start, fe: str = forecast_end) -> PredictionConfig:
+            return PredictionConfig(method=method, params=params or {}, forecast_start_period_key=fs, forecast_end_period_key=fe)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO VENTAS RETAIL
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Demanda retail exportada ───────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_ventas_demanda_base", premise_id="prem_ventas_demanda",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("linear_trend", {"lookback_periods": 12})),
+            PremiseModeRecord(id="mode_ventas_demanda_conservador", premise_id="prem_ventas_demanda",
+                              name="Conservador", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+            PremiseModeRecord(id="mode_ventas_demanda_optimista", premise_id="prem_ventas_demanda",
+                              name="Optimista +5.4%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 5.4})),
+            PremiseModeRecord(id="mode_ventas_demanda_pesimista", premise_id="prem_ventas_demanda",
+                              name="Pesimista −3.2%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -3.2})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Ticket promedio retail ─────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_ventas_ticket_base", premise_id="prem_ventas_ticket_promedio",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 2.1})),
+            PremiseModeRecord(id="mode_ventas_ticket_alto", premise_id="prem_ventas_ticket_promedio",
+                              name="Precio premium +4.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 4.5})),
+            PremiseModeRecord(id="mode_ventas_ticket_plano", premise_id="prem_ventas_ticket_promedio",
+                              name="Tarifa congelada", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── % Promoción retail ─────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_ventas_promo_base", premise_id="prem_ventas_promocion",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 4})),
+            PremiseModeRecord(id="mode_ventas_promo_agresiva", premise_id="prem_ventas_promocion",
+                              name="Promoción agresiva +3%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 3.0})),
+            PremiseModeRecord(id="mode_ventas_promo_contenida", premise_id="prem_ventas_promocion",
+                              name="Promoción contenida", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO COMBUSTIBLE
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Precio gasolina Q/galón ────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_gasolina_base", premise_id="prem_combustible_gasolina",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("seasonal_naive", {"season_length": 12})),
+            PremiseModeRecord(id="mode_gasolina_choque", premise_id="prem_combustible_gasolina",
+                              name="Choque alcista +6.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 6.5})),
+            PremiseModeRecord(id="mode_gasolina_estabilizacion", premise_id="prem_combustible_gasolina",
+                              name="Estabilización moderada", is_default=False,
+                              prediction_config=cfg("moving_average", {"window": 5})),
+            PremiseModeRecord(id="mode_gasolina_baja", premise_id="prem_combustible_gasolina",
+                              name="Precio a la baja −2.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -2.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Precio diesel Q/galón ──────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_diesel_base", premise_id="prem_combustible_diesel",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("seasonal_naive", {"season_length": 12})),
+            PremiseModeRecord(id="mode_diesel_choque", premise_id="prem_combustible_diesel",
+                              name="Choque alcista +7.2%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 7.2})),
+            PremiseModeRecord(id="mode_diesel_moderado", premise_id="prem_combustible_diesel",
+                              name="Alza moderada +3.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 3.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Flete por ruta ─────────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_flete_base", premise_id="prem_combustible_flete",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 3})),
+            PremiseModeRecord(id="mode_flete_alto", premise_id="prem_combustible_flete",
+                              name="Costos logísticos altos +5.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 5.0})),
+            PremiseModeRecord(id="mode_flete_congelado", premise_id="prem_combustible_flete",
+                              name="Tarifa negociada fija", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO MACRO
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Tipo de cambio GTQ/USD ─────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_fx_base", premise_id="prem_macro_tipo_cambio",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 4})),
+            PremiseModeRecord(id="mode_fx_depreciacion_moderada", premise_id="prem_macro_tipo_cambio",
+                              name="Depreciación moderada +1.6%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 1.6})),
+            PremiseModeRecord(id="mode_fx_depreciacion_severa", premise_id="prem_macro_tipo_cambio",
+                              name="Depreciación severa +3.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 3.5})),
+            PremiseModeRecord(id="mode_fx_apreciacion", premise_id="prem_macro_tipo_cambio",
+                              name="Apreciación cambiaria −0.8%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -0.8})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Resina USD/ton ─────────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_resina_base", premise_id="prem_macro_resina_usd",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("arima_like", {"lookback_periods": 24})),
+            PremiseModeRecord(id="mode_resina_alta", premise_id="prem_macro_resina_usd",
+                              name="Resina cara +4.8%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 4.8})),
+            PremiseModeRecord(id="mode_resina_baja", premise_id="prem_macro_resina_usd",
+                              name="Resina barata −3.2%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -3.2})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Inflación bienes importados ────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_inflacion_base", premise_id="prem_macro_inflacion_bienes",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 5})),
+            PremiseModeRecord(id="mode_inflacion_alta", premise_id="prem_macro_inflacion_bienes",
+                              name="Inflación alta +3.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 3.5})),
+            PremiseModeRecord(id="mode_inflacion_elevada", premise_id="prem_macro_inflacion_bienes",
+                              name="Inflación elevada +5.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 5.0})),
+            PremiseModeRecord(id="mode_inflacion_baja", premise_id="prem_macro_inflacion_bienes",
+                              name="Inflación baja −2.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -2.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO ARIMA OPERATIVO
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Demanda operativa ──────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_arima_demanda_base", premise_id="prem_arima_demanda",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("arima_like", {"lookback_periods": 24})),
+            PremiseModeRecord(id="mode_arima_demanda_stress", premise_id="prem_arima_demanda",
+                              name="Estrés operativo", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+            PremiseModeRecord(id="mode_arima_demanda_upside", premise_id="prem_arima_demanda",
+                              name="Upside por tendencia", is_default=False,
+                              prediction_config=cfg("linear_trend", {"lookback_periods": 12})),
+            PremiseModeRecord(id="mode_arima_demanda_contraccion", premise_id="prem_arima_demanda",
+                              name="Contracción −4.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -4.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Precio unitario USD/unidad ─────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_arima_precio_base", premise_id="prem_arima_precio_unitario",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 2.4})),
+            PremiseModeRecord(id="mode_arima_precio_alto", premise_id="prem_arima_precio_unitario",
+                              name="Precio premium +4.2%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 4.2})),
+            PremiseModeRecord(id="mode_arima_precio_congelado", premise_id="prem_arima_precio_unitario",
+                              name="Precio congelado", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Costo fijo mensual Q ───────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_arima_costo_fijo_base", premise_id="prem_arima_costo_fijo",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 1.8})),
+            PremiseModeRecord(id="mode_arima_costo_fijo_contencion", premise_id="prem_arima_costo_fijo",
+                              name="Contención de costos", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+            PremiseModeRecord(id="mode_arima_costo_fijo_reduccion", premise_id="prem_arima_costo_fijo",
+                              name="Reducción por eficiencia −1.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -1.5})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Ocupación bodega % ─────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_arima_bodega_base", premise_id="prem_arima_ocupacion_bodega",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 4})),
+            PremiseModeRecord(id="mode_arima_bodega_alta", premise_id="prem_arima_ocupacion_bodega",
+                              name="Alta ocupación +3.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 3.5})),
+            PremiseModeRecord(id="mode_arima_bodega_baja", premise_id="prem_arima_ocupacion_bodega",
+                              name="Ocupación baja", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO AGRO EXPORTACIÓN
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Lluvia acumulada mm ────────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_agro_lluvia_base", premise_id="prem_agro_lluvia",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 4})),
+            PremiseModeRecord(id="mode_agro_lluvia_sequia", premise_id="prem_agro_lluvia",
+                              name="Sequía severa −35%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -35.0})),
+            PremiseModeRecord(id="mode_agro_lluvia_abundante", premise_id="prem_agro_lluvia",
+                              name="Lluvias abundantes +22%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 22.0})),
+            PremiseModeRecord(id="mode_agro_lluvia_niña", premise_id="prem_agro_lluvia",
+                              name="Año Niña estacional", is_default=False,
+                              prediction_config=cfg("seasonal_naive", {"season_length": 12})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Volumen café exportado QQ ──────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_agro_cafe_base", premise_id="prem_agro_cafe_volumen",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("seasonal_naive", {"season_length": 12})),
+            PremiseModeRecord(id="mode_agro_cafe_sequia", premise_id="prem_agro_cafe_volumen",
+                              name="Sequía: rendimiento −22%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -22.0})),
+            PremiseModeRecord(id="mode_agro_cafe_record", premise_id="prem_agro_cafe_volumen",
+                              name="Cosecha récord +15%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 15.0})),
+            PremiseModeRecord(id="mode_agro_cafe_tendencia", premise_id="prem_agro_cafe_volumen",
+                              name="Tendencia histórica 18m", is_default=False,
+                              prediction_config=cfg("linear_trend", {"lookback_periods": 18})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Precio internacional café USD/QQ ──────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_agro_precio_base", premise_id="prem_agro_precio_cafe",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("arima_like", {"lookback_periods": 24})),
+            PremiseModeRecord(id="mode_agro_precio_alta", premise_id="prem_agro_precio_cafe",
+                              name="Precio internacional alto +8%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 8.0})),
+            PremiseModeRecord(id="mode_agro_precio_baja", premise_id="prem_agro_precio_cafe",
+                              name="Precio internacional bajo −10%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -10.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO EXPANSIÓN RETAIL
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Tiendas nuevas por mes ─────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_expansion_tiendas_base", premise_id="prem_expansion_tiendas",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("linear_trend", {"lookback_periods": 12})),
+            PremiseModeRecord(id="mode_expansion_tiendas_agresiva", premise_id="prem_expansion_tiendas",
+                              name="Expansión agresiva +12%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 12.0})),
+            PremiseModeRecord(id="mode_expansion_tiendas_moderada", premise_id="prem_expansion_tiendas",
+                              name="Paso moderado +6%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 6.0})),
+            PremiseModeRecord(id="mode_expansion_tiendas_pausa", premise_id="prem_expansion_tiendas",
+                              name="Pausa de aperturas", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Capex por tienda Q miles ───────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_expansion_capex_base", premise_id="prem_expansion_capex_tienda",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("moving_average", {"window": 3})),
+            PremiseModeRecord(id="mode_expansion_capex_alto", premise_id="prem_expansion_capex_tienda",
+                              name="Capex de alta densidad +5.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 5.5})),
+            PremiseModeRecord(id="mode_expansion_capex_eficiente", premise_id="prem_expansion_capex_tienda",
+                              name="Capex eficiente −2.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -2.5})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ── Meses de payback por tienda ────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_expansion_payback_base", premise_id="prem_expansion_payback",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("carry_forward")),
+            PremiseModeRecord(id="mode_expansion_payback_largo", premise_id="prem_expansion_payback",
+                              name="Payback extendido +2.5%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 2.5})),
+            PremiseModeRecord(id="mode_expansion_payback_corto", premise_id="prem_expansion_payback",
+                              name="Payback acelerado −2.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": -2.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODELO HOLDING CONSOLIDADO
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Gastos corporativos Q ──────────────────────────────────────────
+        for mode in [
+            PremiseModeRecord(id="mode_holding_corp_base", premise_id="prem_holding_corporativo",
+                              name="Base", is_default=True,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 1.5})),
+            PremiseModeRecord(id="mode_holding_corp_contencion", premise_id="prem_holding_corporativo",
+                              name="Contención corporativa", is_default=False,
+                              prediction_config=cfg("carry_forward")),
+            PremiseModeRecord(id="mode_holding_corp_expansion", premise_id="prem_holding_corporativo",
+                              name="Inversión corporativa +4.0%", is_default=False,
+                              prediction_config=cfg("growth_rate_pct", {"rate": 4.0})),
+        ]:
+            self.create_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # COMPOSITE MODES
+        # ══════════════════════════════════════════════════════════════════════
+
+        # ── Ingreso agro consolidado ───────────────────────────────────────
+        for mode in [
+            CompositePremiseModeRecord(id="cmode_holding_agro_base", premise_id="prem_holding_ingreso_agro",
+                                       name="Base", is_default=True, overrides=[]),
+            CompositePremiseModeRecord(
+                id="cmode_holding_agro_sequia",
+                premise_id="prem_holding_ingreso_agro",
+                name="Sequía severa",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_agro_lluvia", "mode_id": "mode_agro_lluvia_sequia"},
+                    {"premise_id": "prem_agro_cafe_volumen", "mode_id": "mode_agro_cafe_sequia"},
+                    {"premise_id": "prem_agro_precio_cafe", "mode_id": "mode_agro_precio_baja"},
+                ],
+            ),
+            CompositePremiseModeRecord(
+                id="cmode_holding_agro_record",
+                premise_id="prem_holding_ingreso_agro",
+                name="Cosecha récord + precio alto",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_agro_lluvia", "mode_id": "mode_agro_lluvia_abundante"},
+                    {"premise_id": "prem_agro_cafe_volumen", "mode_id": "mode_agro_cafe_record"},
+                    {"premise_id": "prem_agro_precio_cafe", "mode_id": "mode_agro_precio_alta"},
+                ],
+            ),
+        ]:
+            self.create_composite_premise_mode(mode=mode)
+
+        # ── Ingreso retail consolidado ─────────────────────────────────────
+        for mode in [
+            CompositePremiseModeRecord(id="cmode_holding_retail_base", premise_id="prem_holding_ingreso_retail",
+                                       name="Base", is_default=True, overrides=[]),
+            CompositePremiseModeRecord(
+                id="cmode_holding_retail_upside",
+                premise_id="prem_holding_ingreso_retail",
+                name="Upside demanda y precio",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_ventas_demanda", "mode_id": "mode_ventas_demanda_optimista"},
+                    {"premise_id": "prem_ventas_ticket_promedio", "mode_id": "mode_ventas_ticket_alto"},
+                    {"premise_id": "prem_ventas_promocion", "mode_id": "mode_ventas_promo_contenida"},
+                ],
+            ),
+            CompositePremiseModeRecord(
+                id="cmode_holding_retail_conservador",
+                premise_id="prem_holding_ingreso_retail",
+                name="Escenario conservador",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_ventas_demanda", "mode_id": "mode_ventas_demanda_conservador"},
+                    {"premise_id": "prem_ventas_ticket_promedio", "mode_id": "mode_ventas_ticket_plano"},
+                ],
+            ),
+        ]:
+            self.create_composite_premise_mode(mode=mode)
+
+        # ── Flujo expansión consolidado ────────────────────────────────────
+        for mode in [
+            CompositePremiseModeRecord(id="cmode_holding_exp_base", premise_id="prem_holding_flujo_expansion",
+                                       name="Base", is_default=True, overrides=[]),
+            CompositePremiseModeRecord(
+                id="cmode_holding_exp_agresiva",
+                premise_id="prem_holding_flujo_expansion",
+                name="Expansión agresiva",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_expansion_tiendas", "mode_id": "mode_expansion_tiendas_agresiva"},
+                    {"premise_id": "prem_expansion_capex_tienda", "mode_id": "mode_expansion_capex_alto"},
+                    {"premise_id": "prem_expansion_payback", "mode_id": "mode_expansion_payback_largo"},
+                ],
+            ),
+            CompositePremiseModeRecord(
+                id="cmode_holding_exp_eficiente",
+                premise_id="prem_holding_flujo_expansion",
+                name="Expansión eficiente",
+                is_default=False,
+                overrides=[
+                    {"premise_id": "prem_expansion_tiendas", "mode_id": "mode_expansion_tiendas_moderada"},
+                    {"premise_id": "prem_expansion_capex_tienda", "mode_id": "mode_expansion_capex_eficiente"},
+                    {"premise_id": "prem_expansion_payback", "mode_id": "mode_expansion_payback_corto"},
+                ],
+            ),
+        ]:
+            self.create_composite_premise_mode(mode=mode)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # SCENARIO ↔ PREMISE MODE SELECTIONS
+        # El mismo modo puede asignarse a distintos escenarios sin redefinirlo.
+        # ══════════════════════════════════════════════════════════════════════
+
+        for rec in [
+            # ── scn_ventas_upside: demanda optimista, ticket alto, promo contenida
+            ScenarioPremiseModeRecord(scenario_id="scn_ventas_upside", premise_id="prem_ventas_demanda",
+                                      mode_id="mode_ventas_demanda_optimista"),
+            ScenarioPremiseModeRecord(scenario_id="scn_ventas_upside", premise_id="prem_ventas_ticket_promedio",
+                                      mode_id="mode_ventas_ticket_alto"),
+            ScenarioPremiseModeRecord(scenario_id="scn_ventas_upside", premise_id="prem_ventas_promocion",
+                                      mode_id="mode_ventas_promo_contenida"),
+
+            # ── scn_combustible_choque: gasolina, diesel y flete en choque
+            ScenarioPremiseModeRecord(scenario_id="scn_combustible_choque", premise_id="prem_combustible_gasolina",
+                                      mode_id="mode_gasolina_choque"),
+            ScenarioPremiseModeRecord(scenario_id="scn_combustible_choque", premise_id="prem_combustible_diesel",
+                                      mode_id="mode_diesel_choque"),
+            ScenarioPremiseModeRecord(scenario_id="scn_combustible_choque", premise_id="prem_combustible_flete",
+                                      mode_id="mode_flete_alto"),
+
+            # ── scn_macro_depreciacion: FX severo, inflación elevada, resina cara
+            ScenarioPremiseModeRecord(scenario_id="scn_macro_depreciacion", premise_id="prem_macro_tipo_cambio",
+                                      mode_id="mode_fx_depreciacion_severa"),
+            ScenarioPremiseModeRecord(scenario_id="scn_macro_depreciacion", premise_id="prem_macro_inflacion_bienes",
+                                      mode_id="mode_inflacion_elevada"),
+            ScenarioPremiseModeRecord(scenario_id="scn_macro_depreciacion", premise_id="prem_macro_resina_usd",
+                                      mode_id="mode_resina_alta"),
+
+            # ── scn_arima_estres: demanda frenada, precio congelado, costos contenidos, bodega baja
+            # mode_arima_costo_fijo_contencion se reutiliza aquí y en scn_arima_upside
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_estres", premise_id="prem_arima_demanda",
+                                      mode_id="mode_arima_demanda_stress"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_estres", premise_id="prem_arima_precio_unitario",
+                                      mode_id="mode_arima_precio_congelado"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_estres", premise_id="prem_arima_costo_fijo",
+                                      mode_id="mode_arima_costo_fijo_contencion"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_estres", premise_id="prem_arima_ocupacion_bodega",
+                                      mode_id="mode_arima_bodega_baja"),
+
+            # ── scn_arima_upside: mejor demanda, precio premium, costos contenidos, bodega alta
+            # mode_arima_costo_fijo_contencion reutilizado — mismo modo, distinto escenario
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_upside", premise_id="prem_arima_demanda",
+                                      mode_id="mode_arima_demanda_upside"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_upside", premise_id="prem_arima_precio_unitario",
+                                      mode_id="mode_arima_precio_alto"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_upside", premise_id="prem_arima_costo_fijo",
+                                      mode_id="mode_arima_costo_fijo_contencion"),
+            ScenarioPremiseModeRecord(scenario_id="scn_arima_upside", premise_id="prem_arima_ocupacion_bodega",
+                                      mode_id="mode_arima_bodega_alta"),
+
+            # ── scn_agro_sequia: lluvia escasa, rendimiento bajo, precio bajo — triple impacto
+            ScenarioPremiseModeRecord(scenario_id="scn_agro_sequia", premise_id="prem_agro_lluvia",
+                                      mode_id="mode_agro_lluvia_sequia"),
+            ScenarioPremiseModeRecord(scenario_id="scn_agro_sequia", premise_id="prem_agro_cafe_volumen",
+                                      mode_id="mode_agro_cafe_sequia"),
+            ScenarioPremiseModeRecord(scenario_id="scn_agro_sequia", premise_id="prem_agro_precio_cafe",
+                                      mode_id="mode_agro_precio_baja"),
+
+            # ── scn_expansion_agresiva: apertura acelerada, capex denso, payback extendido
+            ScenarioPremiseModeRecord(scenario_id="scn_expansion_agresiva", premise_id="prem_expansion_tiendas",
+                                      mode_id="mode_expansion_tiendas_agresiva"),
+            ScenarioPremiseModeRecord(scenario_id="scn_expansion_agresiva", premise_id="prem_expansion_capex_tienda",
+                                      mode_id="mode_expansion_capex_alto"),
+            ScenarioPremiseModeRecord(scenario_id="scn_expansion_agresiva", premise_id="prem_expansion_payback",
+                                      mode_id="mode_expansion_payback_largo"),
+
+            # ── scn_holding_sinergias: retail upside, agro récord, expansión eficiente, corp contenida
+            ScenarioPremiseModeRecord(scenario_id="scn_holding_sinergias", premise_id="prem_holding_ingreso_retail",
+                                      mode_id="cmode_holding_retail_upside"),
+            ScenarioPremiseModeRecord(scenario_id="scn_holding_sinergias", premise_id="prem_holding_ingreso_agro",
+                                      mode_id="cmode_holding_agro_record"),
+            ScenarioPremiseModeRecord(scenario_id="scn_holding_sinergias", premise_id="prem_holding_flujo_expansion",
+                                      mode_id="cmode_holding_exp_eficiente"),
+            ScenarioPremiseModeRecord(scenario_id="scn_holding_sinergias", premise_id="prem_holding_corporativo",
+                                      mode_id="mode_holding_corp_contencion"),
+        ]:
+            self.upsert_scenario_premise_mode(scenario_id=rec.scenario_id, premise_id=rec.premise_id, mode_id=rec.mode_id)
 
     def _seed_activity_log(self) -> None:
         for entry in [

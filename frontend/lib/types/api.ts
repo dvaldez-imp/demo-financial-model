@@ -62,6 +62,53 @@ export type BoardValue = {
   editable: boolean;
 };
 
+export type PremiseMode = {
+  id: string;
+  premise_id: string;
+  name: string;
+  is_default: boolean;
+  prediction_config: PredictionConfigOut;
+};
+
+export type CompositePremiseModeOverride = {
+  premise_id: string;
+  mode_id: string;
+};
+
+export type CompositePremiseMode = {
+  id: string;
+  premise_id: string;
+  name: string;
+  is_default: boolean;
+  overrides: CompositePremiseModeOverride[];
+  inherited_from_mode_id: string | null;
+};
+
+export type CreatePremiseModeRequest = {
+  name: string;
+  prediction_config: PredictionConfig;
+};
+
+export type UpdatePremiseModeRequest = {
+  name?: string;
+  prediction_config?: PredictionConfig;
+};
+
+export type CreateCompositePremiseModeRequest = {
+  name: string;
+  overrides: CompositePremiseModeOverride[];
+  inherited_from_mode_id?: string | null;
+};
+
+export type UpdateCompositePremiseModeRequest = {
+  name?: string;
+  overrides?: CompositePremiseModeOverride[];
+};
+
+export type SetScenarioPremiseModeRequest = {
+  mode_id: string;
+};
+
 export type BoardPremise = {
   id: string;
   name: string;
@@ -76,7 +123,9 @@ export type BoardPremise = {
   source_model_id: string | null;
   source_output_id: string | null;
   prediction_base: PredictionConfigOut;
-  prediction_override: PredictionConfigOut | null;
+  modes: PremiseMode[];
+  composite_modes: CompositePremiseMode[];
+  active_mode_id: string | null;
   year_summary_method: YearSummaryMethod;
   year_summary_method_label: string;
   values: BoardValue[];
@@ -251,13 +300,8 @@ export type UpdateTimelineRequest = {
   forecast_end_period_key: string;
 };
 
-export type ScenarioPredictionOverridePayload = PredictionConfig & {
-  scenario_id: string;
-};
-
 export type UpdatePredictionConfigRequest = {
   base?: PredictionConfig | null;
-  scenario_override?: ScenarioPredictionOverridePayload | null;
 };
 
 export type UpdateYearSummaryConfigRequest = {

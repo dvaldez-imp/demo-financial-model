@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -21,10 +22,6 @@ def test_board_returns_zone_prediction_and_value_origins() -> None:
         f"/models/{model_id}/import-grid",
         json={"raw_text": "Premisa\tene-25\tfeb-25\nVentas\t100\t120"},
     )
-    scenario = client.post(
-        f"/models/{model_id}/scenarios",
-        json={"name": "Upside", "description": "Escenario de prueba"},
-    ).json()
     client.patch(
         f"/premises/{premise['id']}/prediction-config",
         json={
@@ -34,27 +31,20 @@ def test_board_returns_zone_prediction_and_value_origins() -> None:
                 "forecast_start_period_key": "2025-03",
                 "forecast_end_period_key": "2025-04",
             },
-            "scenario_override": {
-                "scenario_id": scenario["id"],
-                "method": "carry_forward",
-                "params": {},
-                "forecast_start_period_key": "2025-03",
-                "forecast_end_period_key": "2025-04",
-            },
         },
     )
 
-    response = client.get(f"/models/{model_id}/board", params={"scenario_id": scenario["id"]})
+    response = client.get(f"/models/{model_id}/board")
     assert response.status_code == 200
     payload = response.json()
     assert [period["zone"] for period in payload["periods"]] == ["historical", "historical", "forecast", "forecast", "summary"]
 
     ventas = next(item for item in payload["premises"] if item["id"] == premise["id"])
     assert ventas["prediction_base"]["method"] == "growth_rate_pct"
-    assert ventas["prediction_override"]["method"] == "carry_forward"
+    assert "prediction_override" not in ventas
     assert ventas["values"][0]["value_origin"] == "actual"
     assert ventas["values"][2]["value_origin"] == "forecast_generated"
-    assert ventas["values"][2]["value"] == 120.0
+    assert ventas["values"][2]["value"] == pytest.approx(132.0)
     assert ventas["values"][4]["value_origin"] == "year_summary"
 
 
@@ -80,12 +70,12 @@ def test_board_returns_year_groups_and_extended_forecast_end() -> None:
     assert any(group["year"] == 2026 and group["summary_period_key"] == "2026" for group in payload["year_groups"])
 
 
-def test_switching_scenario_override_to_manual_keeps_visible_forecast() -> None:
+def test_switching_base_to_manual_keeps_visible_forecast() -> None:
     client = TestClient(create_app(data_dir=make_data_dir(), seed_demo=False))
 
     model = client.post(
         "/models",
-        json={"name": "Override manual", "actuals_end_period_key": "2025-02", "forecast_end_period_key": "2025-04"},
+        json={"name": "Manual switch", "actuals_end_period_key": "2025-02", "forecast_end_period_key": "2025-04"},
     ).json()
     premise = client.post(
         f"/models/{model['id']}/premises",
@@ -103,28 +93,11 @@ def test_switching_scenario_override_to_manual_keeps_visible_forecast() -> None:
         f"/models/{model['id']}/import-grid",
         json={"raw_text": "Premisa\tene-25\tfeb-25\nDemanda\t100\t120"},
     )
-    scenario = client.post(
-        f"/models/{model['id']}/scenarios",
-        json={"name": "Stress", "description": "Escenario editable"},
-    ).json()
-    client.patch(
-        f"/premises/{premise['id']}/prediction-config",
-        json={
-            "scenario_override": {
-                "scenario_id": scenario["id"],
-                "method": "carry_forward",
-                "params": {},
-                "forecast_start_period_key": "2025-03",
-                "forecast_end_period_key": "2025-04",
-            }
-        },
-    )
 
     response = client.patch(
         f"/premises/{premise['id']}/prediction-config",
         json={
-            "scenario_override": {
-                "scenario_id": scenario["id"],
+            "base": {
                 "method": "manual",
                 "params": {},
                 "forecast_start_period_key": "2025-03",
@@ -134,9 +107,12 @@ def test_switching_scenario_override_to_manual_keeps_visible_forecast() -> None:
     )
     assert response.status_code == 200
 
-    board = client.get(f"/models/{model['id']}/board", params={"scenario_id": scenario["id"]}).json()
+    board = client.get(f"/models/{model['id']}/board").json()
     values = next(item for item in board["premises"] if item["id"] == premise["id"])["values"]
-    assert [item["value"] for item in values[:4]] == [100.0, 120.0, 120.0, 120.0]
+    assert values[0]["value"] == pytest.approx(100.0)
+    assert values[1]["value"] == pytest.approx(120.0)
+    assert values[2]["value"] == pytest.approx(132.0)
+    assert values[3]["value"] == pytest.approx(145.2)
     assert values[2]["value_origin"] == "forecast_manual"
     assert values[2]["editable"] is True
     assert values[3]["value_origin"] == "forecast_manual"

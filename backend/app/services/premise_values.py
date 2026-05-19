@@ -99,8 +99,11 @@ class PremiseValueResolver:
 
         selected_records = active_context.values_by_scenario_premise.get((scenario_id, premise.id), {})
         base_records = active_context.values_by_scenario_premise.get((active_context.base_scenario_id, premise.id), {})
-        overrides = self.repository.get_prediction_overrides(scenario_id) if scenario_id != active_context.base_scenario_id else {}
-        prediction = overrides.get(premise.id, premise.prediction_base)
+        prediction = self.repository.get_effective_prediction_config(
+            premise_id=premise.id,
+            scenario_id=scenario_id,
+            fallback=premise.prediction_base,
+        )
         is_formula_prediction = prediction.method == "formula_placeholder"
         expression = str(prediction.params.get("expression", "")).strip() if is_formula_prediction else ""
         formula_variables = extract_formula_variables(expression) if expression else set()

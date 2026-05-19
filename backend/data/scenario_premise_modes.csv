@@ -1,0 +1,3 @@
+scenario_id,premise_id,mode_id
+scn_agro_sequia,prem_agro_lluvia,mode_872ff323
+scn_macro_depreciacion,prem_macro_tipo_cambio,mode_d8f573f0

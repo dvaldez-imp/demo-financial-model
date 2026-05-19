@@ -1,6 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
 import type {
-  PredictionConfig,
   PremiseOut,
   ScenarioOut,
   UpdatePredictionConfigRequest,
@@ -60,20 +59,3 @@ export function updatePremiseVariableName(
   });
 }
 
-export function buildScenarioOverridePayload(
-  scenarioId: string,
-  prediction: PredictionConfig | null,
-) {
-  return {
-    scenario_override: prediction
-      ? {
-          scenario_id: scenarioId,
-          method: prediction.method,
-          params: prediction.params,
-          forecast_start_period_key:
-            prediction.forecast_start_period_key ?? null,
-          forecast_end_period_key: prediction.forecast_end_period_key ?? null,
-        }
-      : null,
-  } satisfies UpdatePredictionConfigRequest;
-}

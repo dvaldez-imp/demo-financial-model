@@ -137,7 +137,6 @@ class UpdatePremiseRequest(BaseModel):
 
 class UpdatePredictionConfigRequest(BaseModel):
     base: PredictionConfig | None = None
-    scenario_override: ScenarioPredictionOverridePayload | None = None
 
 
 class UpdateYearSummaryConfigRequest(BaseModel):
@@ -146,10 +145,6 @@ class UpdateYearSummaryConfigRequest(BaseModel):
 
 class UpdateVariableNameRequest(BaseModel):
     variable_name: str = Field(min_length=1, max_length=120)
-
-
-class ScenarioPredictionOverridePayload(PredictionConfig):
-    scenario_id: str
 
 
 class ScenarioOut(BaseModel):
@@ -202,6 +197,53 @@ class BoardValueOut(BaseModel):
     editable: bool
 
 
+class PremiseModeOut(BaseModel):
+    id: str
+    premise_id: str
+    name: str
+    is_default: bool
+    prediction_config: PredictionConfigOut
+
+
+class CreatePremiseModeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    prediction_config: PredictionConfig = Field(default_factory=PredictionConfig)
+
+
+class UpdatePremiseModeRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    prediction_config: PredictionConfig | None = None
+
+
+class CompositePremiseModeOverrideOut(BaseModel):
+    premise_id: str
+    mode_id: str
+
+
+class CompositePremiseModeOut(BaseModel):
+    id: str
+    premise_id: str
+    name: str
+    is_default: bool
+    overrides: list[CompositePremiseModeOverrideOut]
+    inherited_from_mode_id: str | None
+
+
+class CreateCompositePremiseModeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    overrides: list[CompositePremiseModeOverrideOut] = Field(default_factory=list)
+    inherited_from_mode_id: str | None = None
+
+
+class UpdateCompositePremiseModeRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    overrides: list[CompositePremiseModeOverrideOut] | None = None
+
+
+class SetScenarioPremiseModeRequest(BaseModel):
+    mode_id: str
+
+
 class BoardPremiseOut(BaseModel):
     id: str
     name: str
@@ -218,7 +260,9 @@ class BoardPremiseOut(BaseModel):
     year_summary_method: YearSummaryMethod
     year_summary_method_label: str
     prediction_base: PredictionConfigOut
-    prediction_override: PredictionConfigOut | None = None
+    modes: list[PremiseModeOut] = Field(default_factory=list)
+    composite_modes: list[CompositePremiseModeOut] = Field(default_factory=list)
+    active_mode_id: str | None = None
     values: list[BoardValueOut]
 
 

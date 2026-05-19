@@ -32,7 +32,6 @@ vi.mock("@/lib/api/models", () => ({
 }));
 
 vi.mock("@/lib/api/scenarios", () => ({
-  buildScenarioOverridePayload: vi.fn(),
   updatePremisePredictionConfig: vi.fn(),
   updatePremiseYearSummaryConfig: vi.fn(),
 }));

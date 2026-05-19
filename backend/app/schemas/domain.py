@@ -87,12 +87,6 @@ class ScenarioRecord(BaseModel):
     is_base: bool = False
 
 
-class ScenarioPremiseOverrideRecord(BaseModel):
-    scenario_id: str
-    premise_id: str
-    prediction_override: PredictionConfig
-
-
 class PremiseValueRecord(BaseModel):
     premise_id: str
     period_key: str
@@ -133,3 +127,30 @@ class ActivityLogRecord(BaseModel):
     model_name: str
     description: str
     detail: str | None = None
+
+
+class PremiseModeRecord(BaseModel):
+    """Named prediction configuration for a primitive premise (dependency_type='none')."""
+    id: str
+    premise_id: str
+    name: str
+    is_default: bool = False
+    prediction_config: PredictionConfig = Field(default_factory=PredictionConfig)
+
+
+class CompositePremiseModeRecord(BaseModel):
+    """Named combination of primitive premise modes for a composite (dependent) premise."""
+    id: str
+    premise_id: str
+    name: str
+    is_default: bool = False
+    # Only overrides vs defaults: list of {"premise_id": str, "mode_id": str}
+    overrides: list[dict[str, str]] = Field(default_factory=list)
+    inherited_from_mode_id: str | None = None
+
+
+class ScenarioPremiseModeRecord(BaseModel):
+    """Associates a specific mode with a premise within a scenario."""
+    scenario_id: str
+    premise_id: str
+    mode_id: str

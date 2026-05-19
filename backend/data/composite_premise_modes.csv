@@ -1,0 +1,4 @@
+id,premise_id,name,is_default,overrides_json,inherited_from_mode_id
+cmode_prem_holding_ingreso_retail_base,prem_holding_ingreso_retail,Base,true,[],
+cmode_prem_holding_ingreso_agro_base,prem_holding_ingreso_agro,Base,true,[],
+cmode_prem_holding_flujo_expansion_base,prem_holding_flujo_expansion,Base,true,[],

@@ -22,7 +22,9 @@ const premise: BoardPremise = {
     forecast_end_period_key: "2025-12",
     method_label: "Manual",
   },
-  prediction_override: null,
+  modes: [],
+  composite_modes: [],
+  active_mode_id: null,
   year_summary_method: "last_value",
   year_summary_method_label: "Ultimo valor",
   values: [],
@@ -47,11 +49,10 @@ describe("PredictionConfigPanel", () => {
           },
         ]}
         scenarioName="Base"
+        scenarioId="scn_base"
         isBaseScenario
         onSaveBase={onSaveBase}
-        onSaveOverride={vi.fn()}
         onSaveYearSummaryMethod={vi.fn()}
-        onClearOverride={vi.fn()}
       />,
     );
 
@@ -84,11 +85,10 @@ describe("PredictionConfigPanel", () => {
         availableVariables={["gasolina", "demanda"]}
         formulaCandidates={[]}
         scenarioName="Base"
+        scenarioId="scn_base"
         isBaseScenario
         onSaveBase={onSaveBase}
-        onSaveOverride={vi.fn()}
         onSaveYearSummaryMethod={vi.fn()}
-        onClearOverride={vi.fn()}
       />,
     );
 
